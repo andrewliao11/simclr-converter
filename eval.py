@@ -1,9 +1,14 @@
+"""
+sgpu python eval.py /scratch/gobi1/datasets/imagenet -a resnet50-4x -b 32
+"""
 import argparse
 import os
 import random
 import shutil
-import time
+import json
 import warnings
+import numpy as np
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -15,6 +20,10 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
 from resnet_wider import resnet50x1, resnet50x2, resnet50x4
+
+from my_dataset import ImageFolder
+import ipdb
+
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
@@ -50,71 +59,70 @@ def main():
         sd = 'resnet50-4x.pth'
     else:
         raise NotImplementedError
+
     sd = torch.load(sd, map_location='cpu')
     model.load_state_dict(sd['state_dict'])
+    model.fc = Identity()
 
     model = torch.nn.DataParallel(model).to('cuda')
-
-    # define loss function (criterion) and optimizer
-    criterion = nn.CrossEntropyLoss()
-
     cudnn.benchmark = True
 
     # Data loading code
-    valdir = os.path.join(args.data, 'val')
+    #valdir = os.path.join(args.data, 'val')
+    valdir = os.path.join(args.data, 'train')
 
     # NOTICE, the original model do not have normalization
     val_loader = torch.utils.data.DataLoader(
-        datasets.ImageFolder(valdir, transforms.Compose([
+        ImageFolder(valdir, transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(256),
             transforms.ToTensor(),
-        ])),
-        batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        ]), return_path=True),
+        batch_size=args.batch_size,
+        #shuffle=False,
+        shuffle=True,
+        num_workers=args.workers,
+        pin_memory=True)
 
-    validate(val_loader, model, criterion, args)
+    validate(val_loader, model, args)
 
 
-def validate(val_loader, model, criterion, args):
-    batch_time = AverageMeter('Time', ':6.3f')
-    losses = AverageMeter('Loss', ':.4e')
-    top1 = AverageMeter('Acc@1', ':6.2f')
-    top5 = AverageMeter('Acc@5', ':6.2f')
-    progress = ProgressMeter(
-        len(val_loader),
-        [batch_time, losses, top1, top5],
-        prefix='Test: ')
+def validate(val_loader, model, args):
 
     # switch to evaluate mode
+    self_supervised_features = {}
+    path_arr = []
+    output_arr = []
+    target_arr = []
+
     model.eval()
 
     with torch.no_grad():
-        end = time.time()
-        for i, (images, target) in enumerate(val_loader):
+        for i, (paths, images, target) in tqdm(enumerate(val_loader)):
             target = target.to('cuda')
 
             # compute output
             output = model(images)
-            loss = criterion(output, target)
+            path_arr += [j for j in paths]
+            output_arr += [j for j in output.cpu().numpy()]
+            target_arr += [j for j in target.cpu().numpy()]
 
-            # measure accuracy and record loss
-            acc1, acc5 = accuracy(output, target, topk=(1, 5))
-            losses.update(loss.item(), images.size(0))
-            top1.update(acc1[0], images.size(0))
-            top5.update(acc5[0], images.size(0))
+            if i > (1e6 // args.batch_size):
+                break
 
-            # measure elapsed time
-            batch_time.update(time.time() - end)
-            end = time.time()
 
-            if i % args.print_freq == 0:
-                progress.display(i)
+    path_arr = np.array(path_arr)
+    output_arr = np.array(output_arr)
+    target_arr = np.array(target_arr)
 
-        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-              .format(top1=top1, top5=top5))
-
-    return top1.avg
+    idx = list(val_loader.dataset.idx_to_class.keys())
+    idx.sort()
+    idx_to_class = np.array([val_loader.dataset.idx_to_class[i] for i in idx])
+    np.savez("/scratch/gobi1/andrewliao/simclr/train_self_supervised_features",
+             path=path_arr,
+             output=output_arr,
+             target=target_arr,
+             idx_to_class=idx_to_class)
 
 
 class AverageMeter(object):
@@ -174,6 +182,14 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
+
+
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+
+    def forward(self, x):
+        return x
 
 
 if __name__ == '__main__':

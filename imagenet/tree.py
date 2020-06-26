@@ -2,11 +2,12 @@ import xmltodict
 
 
 class Node(object):
-    def __init__(self, node):
+    def __init__(self, node, parent=None):
         self._node = node
         self.wnid = node['@wnid']
         self.gloss = node['@gloss']
         self.name = node['@words']
+        self.parent = parent
         self._set_children_node()
 
     def _set_children_node(self):
@@ -16,7 +17,7 @@ class Node(object):
             if not isinstance(children, list):
                 children = [children]
             for child in children:
-                child = Node(child)
+                child = Node(child, parent=self)
                 #if child.numImg > 0:
                 self.children.append(child)
 

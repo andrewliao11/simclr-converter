@@ -1,5 +1,5 @@
 """
-sgpu python eval.py /scratch/gobi1/datasets/imagenet -a resnet50-4x -b 32
+sgpu python eval.py /scratch/gobi1/datasets/imagenet -a resnet50-4x -b 32 -s train
 """
 import argparse
 import os
@@ -33,6 +33,7 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
 parser.add_argument('-a', '--arch', default='resnet50-1x')
+parser.add_argument('-s', '--split', default='train')
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('-b', '--batch-size', default=256, type=int)
@@ -68,8 +69,7 @@ def main():
     cudnn.benchmark = True
 
     # Data loading code
-    #valdir = os.path.join(args.data, 'val')
-    valdir = os.path.join(args.data, 'train')
+    valdir = os.path.join(args.data, args.split)
 
     # NOTICE, the original model do not have normalization
     val_loader = torch.utils.data.DataLoader(
@@ -118,7 +118,7 @@ def validate(val_loader, model, args):
     idx = list(val_loader.dataset.idx_to_class.keys())
     idx.sort()
     idx_to_class = np.array([val_loader.dataset.idx_to_class[i] for i in idx])
-    np.savez("/scratch/gobi1/andrewliao/simclr/train_self_supervised_features",
+    np.savez("/scratch/gobi1/andrewliao/simclr/simclr-v1-{}".format(args.split),
              path=path_arr,
              output=output_arr,
              target=target_arr,

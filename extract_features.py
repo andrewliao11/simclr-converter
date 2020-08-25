@@ -77,12 +77,12 @@ def main():
             transforms.Resize(256),
             transforms.CenterCrop(256),
             transforms.ToTensor(),
-        ]), return_path=True),
+        ]), return_path=True, split="1/3"),
         batch_size=args.batch_size,
-        #shuffle=False,
-        shuffle=True,
+        shuffle=False,
         num_workers=args.workers,
         pin_memory=True)
+
 
     validate(val_loader, model, args)
 
@@ -90,7 +90,6 @@ def main():
 def validate(val_loader, model, args):
 
     # switch to evaluate mode
-    self_supervised_features = {}
     path_arr = []
     output_arr = []
     target_arr = []
@@ -98,90 +97,29 @@ def validate(val_loader, model, args):
     model.eval()
 
     with torch.no_grad():
-        for i, (paths, images, target) in tqdm(enumerate(val_loader)):
-            target = target.to('cuda')
+        for i, (paths, images, targets) in tqdm(enumerate(val_loader)):
 
             # compute output
             output = model(images)
-            path_arr += [j for j in paths]
-            output_arr += [j for j in output.cpu().numpy()]
-            target_arr += [j for j in target.cpu().numpy()]
-
-            if i > (1e6 // args.batch_size):
-                break
+            path_arr.extend(paths)
+            output_arr.append(output.cpu().numpy())
+            target_arr.append(targets.cpu().numpy())
+            if i % 100 == 0:
+                print("{}/{}".format(i, len(val_loader)))
 
 
     path_arr = np.array(path_arr)
-    output_arr = np.array(output_arr)
-    target_arr = np.array(target_arr)
+    output_arr = np.concatenate(output_arr, 0)
+    target_arr = np.concatenate(target_arr, 0)
 
     idx = list(val_loader.dataset.idx_to_class.keys())
     idx.sort()
     idx_to_class = np.array([val_loader.dataset.idx_to_class[i] for i in idx])
-    np.savez("/scratch/gobi1/andrewliao/simclr/simclr-v1-{}".format(args.split),
+    np.savez("/scratch/gobi2/andrewliao/simclr/simclr-v1-{}-1/3".format(args.split),
              path=path_arr,
              output=output_arr,
              target=target_arr,
              idx_to_class=idx_to_class)
-
-
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-
-    def __init__(self, name, fmt=':f'):
-        self.name = name
-        self.fmt = fmt
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-    def __str__(self):
-        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
-        return fmtstr.format(**self.__dict__)
-
-
-class ProgressMeter(object):
-    def __init__(self, num_batches, meters, prefix=""):
-        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
-        self.meters = meters
-        self.prefix = prefix
-
-    def display(self, batch):
-        entries = [self.prefix + self.batch_fmtstr.format(batch)]
-        entries += [str(meter) for meter in self.meters]
-        print('\t'.join(entries))
-
-    def _get_batch_fmtstr(self, num_batches):
-        num_digits = len(str(num_batches // 1))
-        fmt = '{:' + str(num_digits) + 'd}'
-        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
-
-
-def accuracy(output, target, topk=(1,)):
-    """Computes the accuracy over the k top predictions for the specified values of k"""
-    with torch.no_grad():
-        maxk = max(topk)
-        batch_size = target.size(0)
-
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-        res = []
-        for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
-            res.append(correct_k.mul_(100.0 / batch_size))
-        return res
 
 
 class Identity(nn.Module):
